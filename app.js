@@ -1,4 +1,4 @@
-/* Mis Finanzas 1.8.0 — datos cifrados en el dispositivo (AES-256-GCM, clave derivada con PBKDF2) */
+/* Mis Finanzas 1.8.1 — datos cifrados en el dispositivo (AES-256-GCM, clave derivada con PBKDF2) */
 const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)];
 const CLP=new Intl.NumberFormat('es-CL',{style:'currency',currency:'CLP',maximumFractionDigits:0});
 const localISO=(d=new Date())=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
@@ -153,7 +153,7 @@ function usedLimit(cid){return db.purchases.filter(p=>p.cardId===cid).reduce((a,
 function statement(cid,mo){let items=allInstallments().filter(i=>i.month===mo&&db.purchases.find(p=>p.id===i.purchaseId)?.cardId===cid),total=items.reduce((a,b)=>a+b.amount,0),payment=db.statementPayments.find(p=>p.cardId===cid&&p.month===mo);return{items,total,payment}}
 
 
-/* ================= RESUMEN INTELIGENTE, ALERTAS Y EVOLUCIÓN (1.8.0) ================= */
+/* ================= RESUMEN INTELIGENTE, ALERTAS Y EVOLUCIÓN (1.8.1) ================= */
 const nowISO=()=>localISO(),curYM=()=>nowISO().slice(0,7);
 const daysIn=ym=>{const [y,m]=ym.split('-').map(Number);return new Date(y,m,0).getDate()};
 const monthName=(ym,withYear=true)=>{const [y,m]=ym.split('-').map(Number);return new Date(y,m-1,1).toLocaleDateString('es-CL',withYear?{month:'long',year:'numeric'}:{month:'long'})};
@@ -237,7 +237,7 @@ function renderEvo(insts){
   $('#evo').innerHTML=`<svg class="evo" viewBox="0 0 ${W} ${H}" role="group" aria-label="Ingresos y gastos de los últimos 6 meses">${g}</svg><div class="evoleg"><span><i class="sw in"></i>Ingresos</span><span><i class="sw out"></i>Gastos (cuotas incluidas)</span></div><p class="evosum"><b>${esc(monthName(ym))}</b>: ingresos ${money(c.inc)} · gastos ${money(c.out)} · ${net>=0?'ahorro':'déficit'} <b>${money(Math.abs(net))}</b>${c.inc>0&&net>0?` (${Math.round(net/c.inc*100)}% de tus ingresos)`:''}.</p>${avg?`<p class="evosum">Gasto promedio mensual en estos 6 meses: <b>${money(avg)}</b>.</p>`:''}<p class="hint">Toca un mes para verlo en el Resumen.</p>`}
 function pickMonth(_,m){if(!isMonth(str(m)))return;$('#month').value=m;donutSel=null;render()}
 
-/* ================= MOVIMIENTOS: filtros, totales y agrupado por día (1.8.0) ================= */
+/* ================= MOVIMIENTOS: filtros, totales y agrupado por día (1.8.1) ================= */
 const PER_PAGE=50;let movesLimit=PER_PAGE;
 function resetFilters(){$('#search').value='';$('#kind').value='all';$('#mfCat').value='';$('#mfAcc').value='';$('#mfPer').value='all';$('#mfFrom').value=$('#mfTo').value='';movesLimit=PER_PAGE}
 function clearFilters(){resetFilters();renderMoves()}
@@ -294,34 +294,37 @@ function render(){
   $('#catlist').innerHTML=db.cats.map(c=>`<div class="row"><div class="grow"><b>${esc(c.name)}</b><small>${c.type==='expense'?'Gasto':'Ingreso'}</small></div><button class="link" data-act="editCat" data-id="${esc(c.id)}">Editar</button></div>`).join('')}
 
 function bar(n,v,max,t=money(v)){let p=Math.min(100,max?v/max*100:0);return `<div class="bar"><div class="barhead"><span>${esc(n)}</span><span>${t}</span></div><div class="track"><div class="fill ${p>=100?'over':''}" style="width:${p}%"></div></div></div>`}
-/* renderMoves está más abajo, junto con los filtros (1.8.0) */
+/* renderMoves está más abajo, junto con los filtros (1.8.1) */
 
 /* ================= DONA POR CATEGORÍA (SVG propio, sin librerías) ================= */
 let donutSel=null,donutCtx={mp:{},xs:[],inst:[]};
 function donutHTML(){
   const {mp,xs,inst}=donutCtx,total=Object.values(mp).reduce((a,b)=>a+b,0),R=70,C=2*Math.PI*R,W=28;
   let items=Object.entries(mp).filter(([,v])=>v>0).map(([id,v])=>({id,name:cat(id),v,color:catColor(id)})).sort((a,b)=>b.v-a.v);
-  if(items.length>8){const rest=items.slice(7);items=[...items.slice(0,7),{id:'__otras',name:`Otras (${rest.length})`,v:rest.reduce((a,b)=>a+b.v,0),color:'#94a3b8'}]}
+  if(items.length>8){const rest=items.slice(7);items=[...items.slice(0,7),{id:'__otras',name:`Otras (${rest.length})`,v:rest.reduce((a,b)=>a+b.v,0),color:'#94a3b8',rest}]}
   if(donutSel&&!items.some(i=>i.id===donutSel))donutSel=null;
   const sel=items.find(i=>i.id===donutSel),pct=v=>{const p=v/total*100;return p<1?'<1%':Math.round(p)+'%'};
   let acc=0,segs='';
   if(!total)segs=`<circle cx="100" cy="100" r="${R}" fill="none" stroke="#e2e8f0" stroke-width="${W}"/>`;
   else items.forEach(i=>{
     const len=i.v/total*C,gap=items.length>1?Math.min(2.5,len*.25):0,on=!!sel&&sel.id===i.id;
-    segs+=`<circle cx="100" cy="100" r="${R}" fill="none" stroke="${i.color}" stroke-width="${on?W+6:W}" stroke-dasharray="${(len-gap).toFixed(2)} ${(C-len+gap).toFixed(2)}" stroke-dashoffset="${(-acc).toFixed(2)}" transform="rotate(-90 100 100)" opacity="${sel&&!on?0.35:1}"${i.id==='__otras'?'':` data-act="donutSeg" data-id="${esc(i.id)}"`}/>`;
+    segs+=`<circle cx="100" cy="100" r="${R}" fill="none" stroke="${i.color}" stroke-width="${on?W+6:W}" stroke-dasharray="${(len-gap).toFixed(2)} ${(C-len+gap).toFixed(2)}" stroke-dashoffset="${(-acc).toFixed(2)}" transform="rotate(-90 100 100)" opacity="${sel&&!on?0.35:1}" data-act="donutSeg" data-id="${esc(i.id)}"/>`;
     acc+=len});
   const big=sel?money(sel.v):money(total),small=sel?`${sel.name.length>15?sel.name.slice(0,14)+'…':sel.name} · ${pct(sel.v)}`:(total?'Gastos del mes':'Sin gastos');
   const svg=`<svg class="donut" viewBox="0 0 200 200" role="img" aria-label="Gráfico de dona de gastos por categoría">${segs}<text x="100" y="98" class="${big.length>10?'c1 s':'c1'}">${esc(big)}</text><text x="100" y="116" class="c2">${esc(small)}</text></svg>`;
   const legend=items.map(i=>{
     const inner=`<span class="dot" style="background:${i.color}"></span><span class="nm">${esc(i.name)}</span><span class="pc">${pct(i.v)}</span><span class="mt">${money(i.v)}</span>`;
-    return i.id==='__otras'?`<div class="lg">${inner}</div>`:`<button type="button" class="lg${sel&&sel.id===i.id?' on':''}" data-act="donutSeg" data-id="${esc(i.id)}" aria-pressed="${!!sel&&sel.id===i.id}">${inner}</button>`}).join('')||'<p>Sin gastos este mes.</p>';
+    return `<button type="button" class="lg${sel&&sel.id===i.id?' on':''}" data-act="donutSeg" data-id="${esc(i.id)}" aria-pressed="${!!sel&&sel.id===i.id}">${inner}</button>`}).join('')||'<p>Sin gastos este mes.</p>';
   let detail='';
-  if(sel){
+  if(sel&&sel.id==='__otras'){
+    detail=`<div class="donutdetail"><h3>${esc(sel.name)}</h3><p class="hint">Estas categorías son pequeñas y se agrupan. Toca una para ver sus movimientos.</p>${sel.rest.map(c=>`<button type="button" class="lg" data-act="donutCat" data-id="${esc(c.id)}"><span class="dot" style="background:${catColor(c.id)}"></span><span class="nm">${esc(c.name)}</span><span class="pc">${pct(c.v)}</span><span class="mt">${money(c.v)}</span></button>`).join('')}</div>`
+  }else if(sel){
     const det=[...xs.filter(x=>x.type==='expense'&&x.cat===sel.id).map(x=>({d:x.date,t:x.desc,s:new Date(x.date+'T12:00').toLocaleDateString('es-CL'),a:x.amount})),
                ...inst.filter(i=>i.cat===sel.id).map(i=>({d:'',t:i.desc,s:`Cuota ${i.index}/${i.total}`,a:i.amount}))].sort((a,b)=>b.d.localeCompare(a.d));
     detail=`<div class="donutdetail"><h3>${esc(sel.name)}</h3>${det.slice(0,6).map(x=>`<div class="row"><div class="grow"><b>${esc(x.t)}</b><small>${esc(x.s)}</small></div><span class="amt red">-${money(x.a)}</span></div>`).join('')}${det.length>6?`<p>y ${det.length-6} más…</p>`:''}<button type="button" class="muted" data-act="donutMoves">Ver en Movimientos</button></div>`}
   return `<div class="donutwrap">${svg}<div class="legend">${legend}</div></div>${detail||(items.length?'<p class="hint">Toca una categoría para ver su detalle.</p>':'')}`}
 function setDonut(id){donutSel=donutSel===id?null:id;$('#catdonut').innerHTML=donutHTML()}
+function donutCat(id){if(!db.cats.some(c=>c.id===id))return;resetFilters();$('#mfCat').value=id;$('#mfPer').value='month';renderMoves();go('moves')}
 function donutMoves(){if(!donutSel)return;resetFilters();$('#search').value=cat(donutSel);$('#mfPer').value='month';renderMoves();go('moves')}
 
 function paidInstallmentCount(p){return installments(p).filter(i=>db.statementPayments.some(sp=>sp.cardId===p.cardId&&sp.month===i.month)).length}
@@ -431,7 +434,7 @@ function delBudget(id){db.budgets=db.budgets.filter(x=>x.id!==id);save();render(
 function delPurchase(id){if(confirm('¿Eliminar compra y sus cuotas futuras?')){db.purchases=db.purchases.filter(x=>x.id!==id);save();render()}}
 
 /* Todos los botones usan data-act (no hay JavaScript dentro del HTML): permite una política CSP estricta */
-const ACTIONS={editMove,delMove,editBudget,delBudget,editCat,editCard,editPurchase,delPurchase,undoPayment,closeModal,addPurchase:id=>editPurchase(null,id),payStatement,quick:openQuick,closeQuick,qType:setQType,qCat:setQCat,qDate:setQDate,qSave:id=>saveQuick(id==='again'),donutSeg:setDonut,donutMoves,qInst:id=>setQInst(id),more:openMore,closeMore,go,pickMonth,clearFilters,moreMoves};
+const ACTIONS={editMove,delMove,editBudget,delBudget,editCat,editCard,editPurchase,delPurchase,undoPayment,closeModal,addPurchase:id=>editPurchase(null,id),payStatement,quick:openQuick,closeQuick,qType:setQType,qCat:setQCat,qDate:setQDate,qSave:id=>saveQuick(id==='again'),donutSeg:setDonut,donutMoves,donutCat,qInst:id=>setQInst(id),more:openMore,closeMore,go,pickMonth,clearFilters,moreMoves};
 document.addEventListener('click',e=>{const b=e.target.closest('[data-act]');if(!b)return;const a=b.getAttribute('data-act');if(!Object.hasOwn(ACTIONS,a))return;e.preventDefault();ACTIONS[a](b.getAttribute('data-id')??undefined,b.getAttribute('data-month')??undefined)});
 
 /* ================= REGISTRO RÁPIDO (botón +): gasto, ingreso o compra con tarjeta ================= */
@@ -542,7 +545,7 @@ function dl(n,t,tp){let a=document.createElement('a');a.href=URL.createObjectURL
 $('#json').onclick=async()=>{
   if(!key)return;await saveQueue;
   const h=await seal(key,vaultMeta.salt,vaultMeta.iter,JSON.stringify(db),'backup');h.created=today;
-  dl(`finanzas-1.8.0-${today}.cifrado.json`,JSON.stringify(h,null,2),'application/json')};
+  dl(`finanzas-1.8.1-${today}.cifrado.json`,JSON.stringify(h,null,2),'application/json')};
 $('#csv').onclick=()=>{
   if(!confirm('El CSV NO está cifrado: cualquiera que abra el archivo verá tus movimientos. ¿Descargarlo de todas formas?'))return;
   dl('movimientos.csv','﻿Fecha;Tipo;Descripción;Categoría;Monto;Cuenta\n'+db.moves.map(x=>[x.date,x.type,x.desc,cat(x.cat),x.amount,x.account].map(csvCell).join(';')).join('\n'),'text/csv')};

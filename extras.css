@@ -1,4 +1,4 @@
-/* Mis Finanzas 1.8.0 — estilos de la captura rápida y de la dona (se suma a styles.css, no lo reemplaza) */
+/* Mis Finanzas 1.8.1 — estilos de la captura rápida y de la dona (se suma a styles.css, no lo reemplaza) */
 main{padding-bottom:110px}
 button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid #93c5fd;outline-offset:2px}
 
@@ -44,7 +44,7 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid 
 .donutdetail h3{font-size:15px;margin:0 0 6px}
 .donutdetail .muted{margin-top:8px}
 
-/* ===== 1.8.0: resumen inteligente, alertas, evolución, filtros y navegación móvil ===== */
+/* ===== 1.8.1: resumen inteligente, alertas, evolución, filtros y navegación móvil ===== */
 .insight{margin-bottom:12px;padding:16px 18px}
 .insight p{margin:5px 0;color:#334155;font-size:15px;line-height:1.45}
 .insight .big{font-size:19px;font-weight:800;color:#0f172a}
