@@ -1,13 +1,10 @@
-/* Mis Finanzas 1.5.2 — misma clave de datos (mf15): tus datos actuales se conservan */
+/* Mis Finanzas 1.6.0 — datos cifrados en el dispositivo (AES-256-GCM, clave derivada con PBKDF2) */
 const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)];
 const CLP=new Intl.NumberFormat('es-CL',{style:'currency',currency:'CLP',maximumFractionDigits:0});
-/* Fecha LOCAL (antes usaba UTC y en Chile "hoy" pasaba a ser mañana después de ~21:00) */
 const localISO=(d=new Date())=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 const today=localISO(),cm=today.slice(0,7),LOCK_MS=300000;
-/* Escapado de HTML para todo texto ingresado por el usuario */
 const ESC={'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'};
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>ESC[c]);
-/* Celda CSV segura: comillas duplicadas y neutraliza fórmulas (=, +, -, @) */
 const csvCell=v=>{let s=String(v??'');if(/^[=+\-@\t\r]/.test(s))s="'"+s;return '"'+s.replace(/"/g,'""')+'"'};
 
 const sample={cats:[{id:'g1',name:'Supermercado',type:'expense'},{id:'g2',name:'Combustible',type:'expense'},{id:'g3',name:'Tecnología',type:'expense'},{id:'g4',name:'Otros',type:'expense'},{id:'i1',name:'Sueldo',type:'income'}],moves:[{id:'m1',type:'income',amount:2850000,date:cm+'-01',desc:'Sueldo mensual',cat:'i1',account:'Cuenta corriente'}],budgets:[],cards:[{id:'c1',name:'Tarjeta principal',bank:'Banco',limit:3000000,cycleStart:21,cycleEnd:20,dueDay:5}],purchases:[],statementPayments:[]};
@@ -16,7 +13,7 @@ const uid=()=>crypto.randomUUID();
 const isDate=s=>/^\d{4}-\d{2}-\d{2}$/.test(s),isMonth=s=>/^\d{4}-\d{2}$/.test(s);
 const str=(v,d='')=>v==null?d:String(v),num=(v,d=0)=>Number.isFinite(Number(v))?Number(v):d;
 
-/* Valida y normaliza datos (al cargar y al restaurar un respaldo) */
+/* Valida y normaliza datos (al descifrar, al migrar y al restaurar un respaldo) */
 function normalize(raw){
   const r=raw&&typeof raw==='object'&&!Array.isArray(raw)?raw:{};
   const arr=k=>Array.isArray(r[k])?r[k].filter(x=>x&&typeof x==='object'):[];
@@ -33,32 +30,117 @@ function normalize(raw){
   return{cats:cats.length?cats:structuredClone(sample.cats),moves,budgets,cards,purchases,statementPayments};
 }
 
-let db;try{db=normalize(JSON.parse(localStorage.getItem('mf15')||'null')||sample)}catch{db=structuredClone(sample)}
-let mode='',eid=null,timer,changeMode=false,payCtx=null;
-const save=()=>localStorage.setItem('mf15',JSON.stringify(db)),cat=id=>db.cats.find(x=>x.id===id)?.name||'Sin categoría',card=id=>db.cards.find(x=>x.id===id),money=v=>CLP.format(Number(v)||0),month=()=>$('#month').value||cm;
+/* Los datos NO se cargan hasta desbloquear: mientras tanto db está vacía */
+let db=normalize({});
+let mode='',eid=null,timer,payCtx=null;
+const cat=id=>db.cats.find(x=>x.id===id)?.name||'Sin categoría',card=id=>db.cards.find(x=>x.id===id),money=v=>CLP.format(Number(v)||0),month=()=>$('#month').value||cm;
 
-/* ---------- PIN / bloqueo (sin cambios) ---------- */
-async function hashPin(pin,salt){const h=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(salt+pin));return [...new Uint8Array(h)].map(x=>x.toString(16).padStart(2,'0')).join('')}
-function pinConfigured(){return !!localStorage.getItem('mf15-pin-hash')}
-function showLock(setup=false){clearTimeout(timer);$('#lock').classList.remove('hide');$('#pin').value=$('#pin2').value='';$('#pin2').classList.toggle('hide',!setup);$('#lockTitle').textContent=setup?'Protege tus finanzas':'Mis Finanzas bloqueada';$('#lockText').textContent=setup?'Crea y confirma un PIN de 6 dígitos':'Introduce tu PIN de 6 dígitos';$('#unlockBtn').textContent=setup?'Crear PIN':'Desbloquear';$('#pinError').textContent=''}
-function lock(){showLock(false)}
+/* ================= CIFRADO ================= */
+const ITER=600000;                         // iteraciones PBKDF2-SHA256 (recomendación OWASP 2023)
+const enc=new TextEncoder(),dec=new TextDecoder();
+const AAD=t=>enc.encode('mis-finanzas:'+t+':v2');
+const b64e=u=>{let s='';for(let i=0;i<u.length;i+=0x8000)s+=String.fromCharCode.apply(null,u.subarray(i,i+0x8000));return btoa(s)};
+const b64d=s=>Uint8Array.from(atob(s),c=>c.charCodeAt(0));
+async function deriveKey(pass,salt,iter){
+  const base=await crypto.subtle.importKey('raw',enc.encode(String(pass).normalize('NFKC')),'PBKDF2',false,['deriveKey']);
+  return crypto.subtle.deriveKey({name:'PBKDF2',hash:'SHA-256',salt,iterations:iter},base,{name:'AES-GCM',length:256},false,['encrypt','decrypt'])}   // clave NO exportable
+async function seal(k,salt,iter,text,type){   // IV aleatorio nuevo en cada cifrado
+  const iv=crypto.getRandomValues(new Uint8Array(12));
+  const ct=new Uint8Array(await crypto.subtle.encrypt({name:'AES-GCM',iv,additionalData:AAD(type)},k,enc.encode(text)));
+  return{app:'mis-finanzas',type,v:2,kdf:'PBKDF2-SHA256',iter,salt:b64e(salt),iv:b64e(iv),ct:b64e(ct)}}
+async function unseal(k,h,type){const buf=await crypto.subtle.decrypt({name:'AES-GCM',iv:b64d(h.iv),additionalData:AAD(type)},k,b64d(h.ct));return dec.decode(buf)}
+function checkHeader(h,type){
+  if(!(h&&h.app==='mis-finanzas'&&h.type===type&&h.v===2&&h.kdf==='PBKDF2-SHA256'&&Number.isInteger(h.iter)&&h.iter>=100000&&h.iter<=5000000&&['salt','iv','ct'].every(k=>typeof h[k]==='string')))throw new Error('Formato de cifrado no reconocido');
+  return h}
+
+let key=null,vaultMeta=null,saveQueue=Promise.resolve();
+const LEGACY_KEYS=['mf15','mf15-pin-hash','mf15-pin-salt'];
+const vaultExists=()=>!!localStorage.getItem('mf15-vault');
+const legacyPinExists=()=>!!localStorage.getItem('mf15-pin-hash');
+
+/* Cada cambio se cifra y guarda en orden (cola); los datos nunca se escriben en texto plano */
+function save(){
+  if(!key)return;
+  const snap=JSON.stringify(db);
+  saveQueue=saveQueue.then(async()=>{const h=await seal(key,vaultMeta.salt,vaultMeta.iter,snap,'vault');localStorage.setItem('mf15-vault',JSON.stringify(h))}).catch(err=>alert('No se pudieron guardar los cambios: '+err.message))}
+
+/* Primera vez (o migración): cifra los datos actuales, verifica que se pueden descifrar y recién entonces borra el texto plano */
+async function createVault(pass){
+  const rawStr=localStorage.getItem('mf15');let raw=null,corrupt=false;
+  try{raw=JSON.parse(rawStr||'null')}catch{corrupt=true;localStorage.setItem('mf15-corrupto',rawStr)}
+  const newDb=normalize(raw||sample),snap=JSON.stringify(newDb);
+  const salt=crypto.getRandomValues(new Uint8Array(16)),k=await deriveKey(pass,salt,ITER);
+  localStorage.setItem('mf15-vault',JSON.stringify(await seal(k,salt,ITER,snap,'vault')));
+  let back;try{back=await unseal(k,JSON.parse(localStorage.getItem('mf15-vault')),'vault')}catch{back=null}
+  if(back!==snap){localStorage.removeItem('mf15-vault');throw new Error('La verificación del cifrado falló. No se modificó ningún dato.')}
+  LEGACY_KEYS.forEach(n=>localStorage.removeItem(n));
+  key=k;vaultMeta={salt,iter:ITER};db=newDb;
+  if(corrupt)alert('Tus datos antiguos estaban dañados. Se conservó una copia en el navegador (mf15-corrupto) y se creó una base nueva; restaura un respaldo si tienes uno.')}
+
+async function openVault(pass){
+  const h=checkHeader(JSON.parse(localStorage.getItem('mf15-vault')),'vault'),salt=b64d(h.salt);
+  const k=await deriveKey(pass,salt,h.iter);let plain;
+  try{plain=await unseal(k,h,'vault')}catch{return false}       // clave incorrecta o archivo alterado
+  db=normalize(JSON.parse(plain));key=k;vaultMeta={salt,iter:h.iter};
+  LEGACY_KEYS.forEach(n=>localStorage.removeItem(n));              // limpia restos en texto plano
+  return true}
+
+/* ================= BLOQUEO ================= */
+let lockMode='unlock',legacyOk=false,failCount=0,blockedUntil=0,busy=false,pendingBackup=null;
+async function hashPin(pin,salt){const h=await crypto.subtle.digest('SHA-256',enc.encode(salt+pin));return [...new Uint8Array(h)].map(x=>x.toString(16).padStart(2,'0')).join('')}
+const initialMode=()=>vaultExists()?'unlock':(legacyPinExists()&&!legacyOk?'legacy':'setup');
+const LOCK_TEXT={
+  legacy:{title:'Mis Finanzas bloqueada',text:'Introduce tu PIN actual de 6 dígitos. Después crearás una frase de contraseña para cifrar tus datos.',btn:'Continuar',ph:'••••••'},
+  setup:{title:'Cifra tus finanzas',text:'Crea una frase de contraseña de 8 o más caracteres. Si la olvidas no hay forma de recuperar los datos, así que guarda también un respaldo.',btn:'Cifrar y continuar',ph:'Frase de contraseña'},
+  unlock:{title:'Mis Finanzas bloqueada',text:'Introduce tu frase de contraseña',btn:'Desbloquear',ph:'Frase de contraseña'}};
+function showLock(m=initialMode()){
+  clearTimeout(timer);lockMode=m;const t=LOCK_TEXT[m],p=$('#pin');
+  $('#lock').classList.remove('hide');p.value=$('#pin2').value='';
+  $('#pin2').classList.toggle('hide',m!=='setup');
+  p.placeholder=t.ph;$('#pin2').placeholder='Repite la frase';
+  if(m==='legacy'){p.setAttribute('inputmode','numeric');p.maxLength=6}else{p.setAttribute('inputmode','text');p.removeAttribute('maxlength')}
+  p.setAttribute('autocomplete',m==='setup'?'new-password':'current-password');
+  $('#lockTitle').textContent=t.title;$('#lockText').textContent=t.text;$('#unlockBtn').textContent=t.btn;$('#pinError').textContent=''}
+
+/* Borra de la pantalla y de la memoria todo lo sensible */
+function wipe(){
+  key=null;vaultMeta=null;db=normalize({});mode='';eid=null;payCtx=null;pendingBackup=null;
+  ['catbars','budbars','recent','movelist','cardlist','statementlist','budgetlist','catlist','fields'].forEach(i=>$('#'+i).innerHTML='');
+  ['balance','income','expense','cardExpense','mtitle'].forEach(i=>$('#'+i).textContent='');
+  closeModal()}
+function lock(){
+  clearTimeout(timer);
+  if(!key)return;                      // ya bloqueada, o aún en el paso de crear la frase
+  showLock('unlock');                  // 1º se tapa la pantalla…
+  saveQueue=saveQueue.then(wipe)}      // …2º se terminan de guardar los cambios y se borra todo de memoria
 function arm(){clearTimeout(timer);timer=setTimeout(lock,LOCK_MS)}
+function afterUnlock(){$('#lock').classList.add('hide');$('#pin').value=$('#pin2').value='';failCount=0;render();arm()}
+function setBusy(b){busy=b;$('#unlockBtn').disabled=b;$('#unlockBtn').textContent=b?'Procesando…':LOCK_TEXT[lockMode].btn}
+function failed(msg){failCount++;$('#pin').value='';if(failCount>=5){failCount=0;blockedUntil=Date.now()+30000;$('#pinError').textContent='Demasiados intentos. Espera 30 segundos.'}else $('#pinError').textContent=msg}
 
-$('#unlockBtn').onclick=async()=>{
-  let p=$('#pin').value,p2=$('#pin2').value;
-  if(!/^\d{6}$/.test(p))return $('#pinError').textContent='El PIN debe tener 6 dígitos.';
-  if(!pinConfigured()||changeMode){
-    if(p!==p2)return $('#pinError').textContent='Los PIN no coinciden.';
-    let salt=uid();localStorage.setItem('mf15-pin-salt',salt);localStorage.setItem('mf15-pin-hash',await hashPin(p,salt));
-    changeMode=false;$('#lock').classList.add('hide');arm();return}
-  if(await hashPin(p,localStorage.getItem('mf15-pin-salt'))===localStorage.getItem('mf15-pin-hash')){$('#lock').classList.add('hide');arm()}
-  else{$('#pinError').textContent='PIN incorrecto.';$('#pin').value=''}};
+$('#lockForm').onsubmit=async e=>{
+  e.preventDefault();if(busy)return;
+  const p=$('#pin').value,p2=$('#pin2').value,err=t=>{$('#pinError').textContent=t};
+  if(Date.now()<blockedUntil)return err(`Demasiados intentos. Espera ${Math.ceil((blockedUntil-Date.now())/1000)} segundos.`);
+  setBusy(true);
+  try{
+    if(lockMode==='legacy'){
+      if(!/^\d{6}$/.test(p))return err('El PIN debe tener 6 dígitos.');
+      if(await hashPin(p,localStorage.getItem('mf15-pin-salt'))!==localStorage.getItem('mf15-pin-hash'))return failed('PIN incorrecto.');
+      legacyOk=true;failCount=0;showLock('setup');return}
+    if(lockMode==='setup'){
+      if(p.length<8)return err('Usa 8 o más caracteres. Una frase de varias palabras es lo mejor.');
+      if(p!==p2)return err('Las frases no coinciden.');
+      await createVault(p);afterUnlock();return}
+    if(!(await openVault(p)))return failed('Frase incorrecta.');
+    afterUnlock()
+  }catch(x){err('Error: '+x.message)}finally{setBusy(false)}};
 ['pointerdown','keydown','touchstart','scroll'].forEach(e=>document.addEventListener(e,()=>{$('#lock').classList.contains('hide')&&arm()},{passive:true}));
 document.addEventListener('visibilitychange',()=>document.hidden&&lock());
 $('#lockNow').onclick=$('#securityLock').onclick=lock;
-$('#changePin').onclick=()=>{changeMode=true;showLock(true)};
+$('#changePass').onclick=()=>openModal('Cambiar frase de contraseña',f('Frase actual','<input id="fp0" type="password" autocomplete="current-password" required>')+f('Nueva frase (8 o más caracteres)','<input id="fp1" type="password" autocomplete="new-password" required>')+f('Repite la nueva frase','<input id="fp2" type="password" autocomplete="new-password" required>')+'<small>Los respaldos que ya descargaste seguirán necesitando la frase que tenías al exportarlos.</small>','changepass');
 
-/* ---------- Tarjetas: ciclos, cuotas, estados ---------- */
+/* ================= TARJETAS: ciclos, cuotas, estados ================= */
 function addMonths(ym,n){let [y,m]=ym.split('-').map(Number),d=new Date(y,m-1+n,1);return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`}
 function billingMonth(date,c){let d=new Date(date+'T12:00'),day=d.getDate(),ym=date.slice(0,7);return day<=c.cycleEnd?ym:addMonths(ym,1)}
 function installments(p){let c=card(p.cardId),first=billingMonth(p.date,c);return Array.from({length:p.installments},(_,i)=>({purchaseId:p.id,index:i+1,total:p.installments,month:addMonths(first,i),amount:p.installmentValue,desc:p.desc,cat:p.cat}))}
@@ -66,7 +148,7 @@ function allInstallments(){return db.purchases.flatMap(installments)}
 function usedLimit(cid){return db.purchases.filter(p=>p.cardId===cid).reduce((a,p)=>a+p.installments*p.installmentValue,0)-db.statementPayments.filter(p=>p.cardId===cid).reduce((a,p)=>a+p.amount,0)}
 function statement(cid,mo){let items=allInstallments().filter(i=>i.month===mo&&db.purchases.find(p=>p.id===i.purchaseId)?.cardId===cid),total=items.reduce((a,b)=>a+b.amount,0),payment=db.statementPayments.find(p=>p.cardId===cid&&p.month===mo);return{items,total,payment}}
 
-/* ---------- Render (todo texto de usuario pasa por esc(); los botones usan data-act en vez de onclick con datos) ---------- */
+/* ================= RENDER (todo texto de usuario pasa por esc(); botones con data-act) ================= */
 function rows(xs,act=true){
   return xs.map(x=>{
     const sign=x.type==='income'?'+':'-',colour=x.type==='income'?'green':x.type==='card_payment'?'orange':'red';
@@ -103,7 +185,7 @@ function statementMonths(cid){return [...new Set(allInstallments().filter(i=>db.
 
 function renderStatements(){let out='';db.cards.forEach(c=>{let months=statementMonths(c.id),pending=months.filter(m=>!statement(c.id,m).payment).length;out+=`<details class="credit accordion"><summary class="accordionSummary"><span><b>${esc(c.name)}</b><small>${pending} estado${pending===1?'':'s'} pendiente${pending===1?'':'s'}</small></span><span class="chevron">⌄</span></summary><div class="accordionBody">`;months.forEach(m=>{let s=statement(c.id,m);if(!s.items.length)return;let start=addMonths(m,-1)+'-'+String(c.cycleStart).padStart(2,'0'),end=m+'-'+String(c.cycleEnd).padStart(2,'0'),paid=!!s.payment;out+=`<details class="statement"><summary><span>${esc(m)} · ${money(s.total)}</span><span class="tag ${paid?'paid':''}">${paid?'Pagado':'Pendiente'}</span></summary><div class="statementDetail"><p>Período ${esc(start)} al ${esc(end)}. Vencimiento día ${esc(c.dueDay)} del mes siguiente.</p>${s.items.map(i=>`<div class="row"><div class="grow"><b>${esc(i.desc)}</b><small>Cuota ${i.index}/${i.total}</small></div><span class="amt">${money(i.amount)}</span></div>`).join('')}${paid?`<p>Pagado el ${esc(s.payment.date)} desde ${esc(s.payment.account)}.</p><button class="muted" data-act="undoPayment" data-id="${esc(s.payment.id)}">Deshacer pago</button>`:`<button data-act="payStatement" data-id="${esc(c.id)}" data-month="${esc(m)}">Registrar pago del estado</button>`}</div></details>`});out+='</div></details>'});$('#statementlist').innerHTML=out||'<p>Aún no hay cuotas facturadas.</p>'}
 
-/* ---------- Modal y formularios ---------- */
+/* ================= MODAL Y FORMULARIOS ================= */
 function opts(t,s){return db.cats.filter(x=>x.type===t).map(x=>`<option value="${esc(x.id)}" ${x.id===s?'selected':''}>${esc(x.name)}</option>`).join('')}
 function f(n,h){return `<div class="field"><label>${n}</label>${h}</div>`}
 function openModal(title,html,m,id=null){mode=m;eid=id;$('#mtitle').textContent=title;$('#fields').innerHTML=html;$('#modal').classList.remove('hide')}
@@ -126,13 +208,14 @@ function editPurchase(id=null,cid=null){let x=db.purchases.find(y=>y.id===id)||{
 function editBudget(id=null){let x=db.budgets.find(y=>y.id===id)||{month:month(),cat:'g1',amount:''};openModal(id?'Editar presupuesto':'Nuevo presupuesto',f('Mes',`<input id="fm" type="month" value="${esc(x.month)}" required>`)+f('Categoría',`<select id="fc">${opts('expense',x.cat)}</select>`)+f('Monto',`<input id="fa" type="number" min="1" value="${esc(x.amount)}" required>`),'budget',id)}
 function editCat(id=null){let x=db.cats.find(y=>y.id===id)||{name:'',type:'expense'};openModal(id?'Editar categoría':'Nueva categoría',f('Nombre',`<input id="fn" value="${esc(x.name)}" required>`)+f('Tipo',`<select id="ft"><option value="expense" ${x.type==='expense'?'selected':''}>Gasto</option><option value="income" ${x.type==='income'?'selected':''}>Ingreso</option></select>`),'cat',id)}
 
-/* Pago de estado: ahora es un modo más del único handler de submit (antes pisaba el handler y no lo restauraba) */
 function payStatement(cid,mo){
   const st=statement(cid,mo);if(!st.items.length||st.payment)return;
   payCtx={cid,mo};
   openModal('Pagar estado de cuenta',f('Monto del estado',`<input value="${esc(st.total)}" disabled>`)+f('Fecha de pago',`<input id="fpd" type="date" value="${esc(today)}" required>`)+f('Cuenta de origen',`<select id="fpa"><option>Cuenta corriente</option><option>Cuenta vista</option><option>Ahorro</option></select>`),'payment',null)}
 
-$('#form').onsubmit=e=>{
+function applyBackup(plain){db=normalize(JSON.parse(plain));save();render()}
+
+$('#form').onsubmit=async e=>{
   e.preventDefault();
   const id=eid||uid();
   switch(mode){
@@ -161,11 +244,32 @@ $('#form').onsubmit=e=>{
       db.statementPayments.push(payment);
       db.moves.push({id:uid(),type:'card_payment',amount:st.total,date:payment.date,desc:`Pago estado ${mo} ${card(cid).name}`,cat:'g4',account:payment.account,statementPaymentId:payment.id});
       payCtx=null;break}
+    case 'changepass':{
+      const p0=$('#fp0').value,p1=$('#fp1').value,p2=$('#fp2').value;
+      if(p1.length<8){alert('La nueva frase debe tener 8 o más caracteres.');return}
+      if(p1!==p2){alert('Las frases nuevas no coinciden.');return}
+      try{
+        const cur=checkHeader(JSON.parse(localStorage.getItem('mf15-vault')),'vault');
+        let okCur=true;try{await unseal(await deriveKey(p0,vaultMeta.salt,vaultMeta.iter),cur,'vault')}catch{okCur=false}
+        if(!okCur){alert('La frase actual es incorrecta.');return}
+        // el cambio de clave entra en la misma cola que los guardados para que nada se cruce
+        const job=saveQueue.then(async()=>{
+          const salt=crypto.getRandomValues(new Uint8Array(16)),k=await deriveKey(p1,salt,ITER);
+          localStorage.setItem('mf15-vault',JSON.stringify(await seal(k,salt,ITER,JSON.stringify(db),'vault')));
+          key=k;vaultMeta={salt,iter:ITER}});
+        saveQueue=job.catch(()=>{});await job;
+        closeModal();alert('Frase de contraseña actualizada.')
+      }catch(x){alert('No se pudo cambiar la frase: '+x.message)}
+      return}
+    case 'restorepass':{
+      const h=pendingBackup;if(!h){closeModal();return}
+      try{const k=await deriveKey($('#fbp').value,b64d(h.salt),h.iter);applyBackup(await unseal(k,h,'backup'));pendingBackup=null;closeModal();alert('Respaldo restaurado')}
+      catch{alert('Frase incorrecta o respaldo dañado.')}
+      return}
   }
   save();closeModal();render()};
 
 function undoPayment(id){db.statementPayments=db.statementPayments.filter(x=>x.id!==id);db.moves=db.moves.filter(x=>x.statementPaymentId!==id);save();render()}
-/* Borrar un pago de tarjeta desde Movimientos ahora también deshace el pago del estado */
 function delMove(id){
   const m=db.moves.find(x=>x.id===id);if(!m)return;
   if(!confirm(m.type==='card_payment'?'¿Eliminar este pago? El estado de cuenta volverá a quedar pendiente.':'¿Eliminar movimiento?'))return;
@@ -175,20 +279,38 @@ function delMove(id){
 function delBudget(id){db.budgets=db.budgets.filter(x=>x.id!==id);save();render()}
 function delPurchase(id){if(confirm('¿Eliminar compra y sus cuotas futuras?')){db.purchases=db.purchases.filter(x=>x.id!==id);save();render()}}
 
-/* Botones generados dinámicamente: delegación de eventos con data-* (sin interpolar datos dentro de JS) */
-const ACTIONS={editMove,delMove,editBudget,delBudget,editCat,editCard,editPurchase,delPurchase,undoPayment,addPurchase:id=>editPurchase(null,id),payStatement};
+/* Todos los botones usan data-act (no hay JavaScript dentro del HTML): permite una política CSP estricta */
+const ACTIONS={editMove,delMove,editBudget,delBudget,editCat,editCard,editPurchase,delPurchase,undoPayment,closeModal,addPurchase:id=>editPurchase(null,id),payStatement};
 document.addEventListener('click',e=>{const b=e.target.closest('[data-act]');if(!b||!Object.hasOwn(ACTIONS,b.dataset.act))return;e.preventDefault();ACTIONS[b.dataset.act](b.dataset.id,b.dataset.month)});
 
-/* ---------- Navegación, exportar, restaurar ---------- */
+/* ================= NAVEGACIÓN, EXPORTAR, RESTAURAR ================= */
 $$('nav button').forEach(b=>b.onclick=()=>{$$('nav button,.view').forEach(x=>x.classList.remove('on'));b.classList.add('on');$('#'+b.dataset.v).classList.add('on')});
 $('#month').value=cm;$('#month').onchange=render;$('#search').oninput=renderMoves;$('#kind').onchange=renderMoves;
 function dl(n,t,tp){let a=document.createElement('a');a.href=URL.createObjectURL(new Blob([t],{type:tp}));a.download=n;a.click()}
-$('#json').onclick=()=>dl(`finanzas-1.5.2-${today}.json`,JSON.stringify(db,null,2),'application/json');
-$('#csv').onclick=()=>dl('movimientos.csv','﻿Fecha;Tipo;Descripción;Categoría;Monto;Cuenta\n'+db.moves.map(x=>[x.date,x.type,x.desc,cat(x.cat),x.amount,x.account].map(csvCell).join(';')).join('\n'),'text/csv');
+/* Respaldo JSON CIFRADO: reutiliza la sal y la clave de tu frase actual, con un IV nuevo */
+$('#json').onclick=async()=>{
+  if(!key)return;await saveQueue;
+  const h=await seal(key,vaultMeta.salt,vaultMeta.iter,JSON.stringify(db),'backup');h.created=today;
+  dl(`finanzas-1.6.0-${today}.cifrado.json`,JSON.stringify(h,null,2),'application/json')};
+$('#csv').onclick=()=>{
+  if(!confirm('El CSV NO está cifrado: cualquiera que abra el archivo verá tus movimientos. ¿Descargarlo de todas formas?'))return;
+  dl('movimientos.csv','﻿Fecha;Tipo;Descripción;Categoría;Monto;Cuenta\n'+db.moves.map(x=>[x.date,x.type,x.desc,cat(x.cat),x.amount,x.account].map(csvCell).join(';')).join('\n'),'text/csv')};
 $('#restore').onchange=e=>{
   const file=e.target.files[0];if(!file)return;
   const r=new FileReader();
-  r.onload=()=>{try{const imported=JSON.parse(r.result);if(!imported||typeof imported!=='object'||Array.isArray(imported))throw new Error('formato');db=normalize(imported);save();render();alert('Respaldo restaurado')}catch{alert('Archivo no válido')}e.target.value=''};
+  r.onload=async()=>{
+    try{
+      const imported=JSON.parse(r.result);
+      if(!imported||typeof imported!=='object'||Array.isArray(imported))throw new Error('formato');
+      if(imported.ct!==undefined){                         // respaldo cifrado
+        const h=checkHeader(imported,'backup');
+        if(vaultMeta&&h.salt===b64e(vaultMeta.salt)&&h.iter===vaultMeta.iter){applyBackup(await unseal(key,h,'backup'));alert('Respaldo restaurado')}   // misma frase: sin preguntar
+        else{pendingBackup=h;openModal('Restaurar respaldo cifrado',f('Frase de contraseña con la que se exportó el respaldo','<input id="fbp" type="password" autocomplete="off" required>'),'restorepass')}
+      }else{db=normalize(imported);save();render();alert('Respaldo restaurado')}   // respaldo antiguo en texto plano
+    }catch{alert('Archivo no válido')}
+    e.target.value=''};
   r.readAsText(file)};
 $('#reset').onclick=()=>{if(confirm('¿Restablecer datos?')){db=normalize(sample);save();render()}};
-render();showLock(!pinConfigured());
+
+if('serviceWorker'in navigator)addEventListener('load',()=>navigator.serviceWorker.register('./service-worker.js'));
+showLock();
