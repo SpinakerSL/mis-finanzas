@@ -1,4 +1,4 @@
-const C='mis-finanzas-1.6.0',A=['./','./index.html','./styles.css','./app.js?v=1.6.0','./manifest.webmanifest','./icon-192.png','./icon-512.png','./apple-touch-icon.png'];
+const C='mis-finanzas-1.7.0',A=['./','./index.html','./styles.css','./extras.css?v=1.7.0','./app.js?v=1.7.0','./manifest.webmanifest','./icon-192.png','./icon-512.png','./apple-touch-icon.png'];
 /* Instalación tolerante: si un archivo falla, el resto igual se cachea */
 self.addEventListener('install',e=>e.waitUntil(caches.open(C).then(c=>Promise.all(A.map(u=>c.add(u).catch(()=>{})))).then(()=>self.skipWaiting())));
 self.addEventListener('activate',e=>e.waitUntil(caches.keys().then(k=>Promise.all(k.filter(x=>x!==C).map(x=>caches.delete(x)))).then(()=>self.clients.claim())));

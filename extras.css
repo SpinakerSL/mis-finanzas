@@ -1,0 +1,45 @@
+/* Mis Finanzas 1.7.0 — estilos de la captura rápida y de la dona (se suma a styles.css, no lo reemplaza) */
+main{padding-bottom:110px}
+button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid #93c5fd;outline-offset:2px}
+
+/* Botón flotante */
+#fab{position:fixed;right:max(18px,env(safe-area-inset-right));bottom:max(18px,calc(env(safe-area-inset-bottom) + 10px));width:62px;height:62px;border-radius:50%;padding:0;font-size:36px;line-height:1;display:grid;place-items:center;box-shadow:0 10px 26px #2563eb66;z-index:5}
+
+/* Hoja de registro rápido */
+.sheet{position:fixed;inset:0;z-index:8;display:flex;align-items:flex-end;justify-content:center}
+.sheetbg{position:absolute;inset:0;background:#02061788}
+.sheetcard{position:relative;width:min(520px,100%);max-height:94vh;overflow:auto;background:#fff;border-radius:22px 22px 0 0;padding:18px 18px calc(18px + env(safe-area-inset-bottom));box-shadow:0 -10px 40px #0f172a33}
+@media(min-width:700px){.sheet{align-items:center}.sheetcard{border-radius:22px}}
+.seg{display:grid;grid-template-columns:1fr 1fr;gap:4px;background:#e2e8f0;border-radius:13px;padding:4px}
+.seg button{background:transparent;color:#475569;padding:10px}
+.seg button.on{background:#fff;color:#0f172a;box-shadow:0 1px 4px #0f172a1f}
+.qlabel{display:block;font-size:13px;font-weight:700;color:#334155;margin:14px 0 6px}
+.qamt{display:flex;align-items:center;gap:8px;background:#fff;border:2px solid #cbd5e1;border-radius:16px;padding:4px 14px}
+.qamt:focus-within{border-color:var(--b)}
+.qamt span{font-size:26px;font-weight:700;color:#64748b}
+.qamt input{border:0;outline:0;background:transparent;font-size:34px;font-weight:800;padding:6px 0;min-width:0}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{display:inline-flex;align-items:center;gap:8px;background:#f1f5f9;color:#0f172a;border:2px solid transparent;border-radius:999px;padding:10px 14px;font-weight:600}
+.chip.on{background:#eff6ff;border-color:var(--b);color:#1d4ed8}
+.dot{display:inline-block;flex:none;width:11px;height:11px;border-radius:50%}
+.qbtns{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px}
+#qd{margin-top:8px}
+#toast{position:fixed;left:50%;bottom:104px;transform:translateX(-50%);max-width:90vw;background:#0f172a;color:#fff;padding:11px 18px;border-radius:999px;font-size:14px;font-weight:600;box-shadow:0 8px 24px #0f172a44;z-index:12;text-align:center}
+
+/* Dona por categoría */
+.donutwrap{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:18px}
+.donut{width:190px;height:190px;flex:none}
+.donut circle[data-act]{cursor:pointer}
+.donut .c1{font-size:17px;font-weight:800;fill:#0f172a;text-anchor:middle}
+.donut .c1.s{font-size:13px}
+.donut .c2{font-size:10.5px;fill:#64748b;text-anchor:middle}
+.legend{flex:1;min-width:220px}
+.lg{display:flex;align-items:center;gap:9px;width:100%;background:transparent;color:#0f172a;text-align:left;padding:10px;border-radius:11px;font-weight:600}
+.lg.on{background:#eff6ff}
+.lg .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lg .pc{font-size:13px;font-weight:500;color:#64748b}
+.lg .mt{font-size:13px;font-weight:800}
+.hint{text-align:center;margin:12px 0 0}
+.donutdetail{margin-top:14px;padding-top:12px;border-top:1px solid var(--line)}
+.donutdetail h3{font-size:15px;margin:0 0 6px}
+.donutdetail .muted{margin-top:8px}
